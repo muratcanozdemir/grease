@@ -30,8 +30,8 @@ import (
 	"github.com/user/grease/internal/emit"
 	"github.com/user/grease/internal/enrich"
 	"github.com/user/grease/internal/extract"
-	"github.com/user/grease/internal/jd"
 	"github.com/user/grease/internal/filter"
+	"github.com/user/grease/internal/jd"
 	"github.com/user/grease/internal/llm"
 	"github.com/user/grease/internal/types"
 )

@@ -184,7 +184,7 @@ func TestBuild_NonASCIISubjectEncoded(t *testing.T) {
 
 func TestGuessMIME(t *testing.T) {
 	cases := map[string]string{
-		"cv.pdf":    "application/pdf",
+		"cv.pdf":     "application/pdf",
 		"resume.txt": "text/plain",
 	}
 	for name, wantPrefix := range cases {
