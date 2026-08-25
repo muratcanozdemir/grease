@@ -188,3 +188,60 @@ func TestMockProvider_ErrPath(t *testing.T) {
 		t.Error("mock should return configured error")
 	}
 }
+
+func TestMockProvider_ByDomain(t *testing.T) {
+	known := SampleResult("acme.com")
+	m := &MockProvider{ByDomain: map[string]Result{"acme.com": known}}
+
+	res, err := m.FindByDomain(context.Background(), "acme.com")
+	if err != nil {
+		t.Fatalf("known domain: %v", err)
+	}
+	if len(res.Contacts) != len(known.Contacts) {
+		t.Errorf("known domain: got %d contacts, want %d", len(res.Contacts), len(known.Contacts))
+	}
+
+	// A domain absent from the map is "looked, found nobody" — an empty,
+	// non-error Result — not a fallback to m.Result.
+	res, err = m.FindByDomain(context.Background(), "unmapped.com")
+	if err != nil {
+		t.Fatalf("unmapped domain should not error: %v", err)
+	}
+	if len(res.Contacts) != 0 {
+		t.Errorf("unmapped domain should have no contacts, got %d", len(res.Contacts))
+	}
+	if res.Organization.Domain != "unmapped.com" {
+		t.Errorf("unmapped domain result should echo the domain, got %q", res.Organization.Domain)
+	}
+}
+
+func TestFindByDomain_UnparseableBodySurfacesStatusAndSnippet(t *testing.T) {
+	longGarbage := strings.Repeat("not json ", 100)
+	srv := hunterServer(t, http.StatusOK, longGarbage, nil)
+	defer srv.Close()
+
+	h := &HunterProvider{APIKey: "k", BaseURL: srv.URL, HTTP: srv.Client()}
+	_, err := h.FindByDomain(context.Background(), "acme.com")
+	if err == nil {
+		t.Fatal("expected error for unparseable body")
+	}
+	if !strings.Contains(err.Error(), "200") {
+		t.Errorf("error should name the status code, got: %v", err)
+	}
+	// snippet() must bound the body rather than dumping the whole thing.
+	if len(err.Error()) > len(longGarbage) {
+		t.Errorf("error should be bounded by snippet, got length %d", len(err.Error()))
+	}
+}
+
+func TestFindByDomain_NonSuccessStatusWithoutErrorsArray(t *testing.T) {
+	body := `{"data":{"domain":"acme.com","organization":"","pattern":null,"emails":[]}}`
+	srv := hunterServer(t, http.StatusInternalServerError, body, nil)
+	defer srv.Close()
+
+	h := &HunterProvider{APIKey: "k", BaseURL: srv.URL, HTTP: srv.Client()}
+	_, err := h.FindByDomain(context.Background(), "acme.com")
+	if err == nil || !strings.Contains(err.Error(), "500") {
+		t.Errorf("expected status-500 error, got: %v", err)
+	}
+}

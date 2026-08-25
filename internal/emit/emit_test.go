@@ -182,6 +182,25 @@ func TestBuild_NonASCIISubjectEncoded(t *testing.T) {
 	}
 }
 
+// TestBuild_RejectsAddressHeaderInjection guards against CRLF smuggled through
+// an address (e.g. a malicious/compromised enrichment-provider response)
+// injecting extra headers such as a silent Bcc into the .eml.
+func TestBuild_RejectsAddressHeaderInjection(t *testing.T) {
+	e := sampleEmail()
+	e.ToAddress = "victim@example.com>\r\nBcc: attacker@evil.com"
+	raw, err := Build(e)
+	if err == nil {
+		t.Fatalf("expected rejection of CRLF in ToAddress, got output: %s", raw)
+	}
+
+	e = sampleEmail()
+	e.FromAddress = "jane@example.com\r\nX-Injected: yes"
+	raw, err = Build(e)
+	if err == nil {
+		t.Fatalf("expected rejection of CRLF in FromAddress, got output: %s", raw)
+	}
+}
+
 func TestGuessMIME(t *testing.T) {
 	cases := map[string]string{
 		"cv.pdf":     "application/pdf",
