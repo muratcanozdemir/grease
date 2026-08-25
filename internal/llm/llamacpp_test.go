@@ -127,6 +127,33 @@ func TestComplete_TruncationIsAnError(t *testing.T) {
 	}
 }
 
+func TestComplete_UnparseableBodySurfacesStatusAndSnippet(t *testing.T) {
+	longGarbage := strings.Repeat("not json ", 100)
+	srv := captureServer(t, http.StatusOK, longGarbage, nil)
+	defer srv.Close()
+
+	c := NewLlamaCpp(srv.URL)
+	_, err := c.Complete(context.Background(), Request{Prompt: "x"})
+	if err == nil || !strings.Contains(err.Error(), "200") {
+		t.Errorf("expected status-200 unparseable-body error, got: %v", err)
+	}
+	// snippet() must bound the body rather than dumping the whole thing.
+	if len(err.Error()) > len(longGarbage) {
+		t.Errorf("error should be bounded by snippet, got length %d", len(err.Error()))
+	}
+}
+
+func TestComplete_ErrorStatusWithoutBackendMessageUsesSnippet(t *testing.T) {
+	srv := captureServer(t, http.StatusInternalServerError, `{"content":""}`, nil)
+	defer srv.Close()
+
+	c := NewLlamaCpp(srv.URL)
+	_, err := c.Complete(context.Background(), Request{Prompt: "x"})
+	if err == nil || !strings.Contains(err.Error(), "500") {
+		t.Errorf("expected status-500 error, got: %v", err)
+	}
+}
+
 func TestComplete_EmptyBaseURL(t *testing.T) {
 	c := &LlamaCpp{}
 	_, err := c.Complete(context.Background(), Request{Prompt: "x"})

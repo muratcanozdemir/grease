@@ -52,6 +52,19 @@ func Build(e Email) ([]byte, error) {
 	if strings.TrimSpace(e.Body) == "" {
 		return nil, fmt.Errorf("emit: empty body")
 	}
+	// Header values are otherwise safe: Subject and the From/To display names go
+	// through mime.QEncoding, which escapes control bytes as part of encoding
+	// non-ASCII. The raw addresses do not pass through an encoder anywhere, so
+	// they are the one place a CRLF could smuggle extra headers (e.g. a bcc)
+	// into the message — checked explicitly here rather than trusted from an
+	// external source (the recipient address in particular comes from the
+	// enrichment provider, not from grease itself).
+	if err := checkHeaderSafe("From address", e.FromAddress); err != nil {
+		return nil, err
+	}
+	if err := checkHeaderSafe("To address", e.ToAddress); err != nil {
+		return nil, err
+	}
 
 	date := e.Date
 	if date.IsZero() {
@@ -120,6 +133,17 @@ func Build(e Email) ([]byte, error) {
 	}
 
 	return append(hdr.Bytes(), buf.Bytes()...), nil
+}
+
+// checkHeaderSafe rejects a raw header value (one that will not pass through
+// an encoder before being written) that contains a CR or LF. Either would let
+// the value break out of its header line and inject arbitrary additional
+// headers into the message.
+func checkHeaderSafe(field, value string) error {
+	if strings.ContainsAny(value, "\r\n") {
+		return fmt.Errorf("emit: %s contains a line break, which would inject headers into the message", field)
+	}
+	return nil
 }
 
 func writeHeader(b *bytes.Buffer, key, value string) {

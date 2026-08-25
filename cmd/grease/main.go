@@ -18,10 +18,13 @@ package main
 import (
 	"bufio"
 	"context"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -54,14 +57,25 @@ type config struct {
 	useMock    bool
 }
 
+// perStepTimeout bounds each network/model phase of the pipeline. It is
+// applied per phase, not once for the whole run, specifically so it never
+// covers the interactive contact-selection step: that step waits on a human,
+// and a human deciding who to email is not something a fixed deadline should
+// be able to starve the rest of the run over.
+const perStepTimeout = 10 * time.Minute
+
 func run() error {
-	cfg, err := parseFlags()
+	cfg, err := parseFlags(os.Args[1:])
 	if err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		if errors.Is(err, errVersionRequested) {
+			fmt.Println(buildinfo.String())
+			return nil
+		}
 		return err
 	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-	defer cancel()
 
 	// Resume is read once, kept as bytes (for the attachment) and as text (for
 	// grounding the draft). Plain-text resumes ground the model directly; for a
@@ -74,8 +88,13 @@ func run() error {
 	}
 	resumeText := resumeTextForGrounding(cfg.resumePath, resumeBytes)
 
+	// Phase A: ingest, extract, enrich — all network/model calls, bounded by
+	// their own timeout that does not include any waiting on the user.
+	lookupCtx, cancelLookup := context.WithTimeout(context.Background(), perStepTimeout)
+	defer cancelLookup()
+
 	// 1. Ingest JD.
-	jdText, err := jd.Source(ctx, cfg.jdInput, nil)
+	jdText, err := jd.Source(lookupCtx, cfg.jdInput, nil)
 	if err != nil {
 		return err
 	}
@@ -85,7 +104,7 @@ func run() error {
 
 	// 3. Extract (grammar-constrained).
 	fmt.Fprintln(os.Stderr, "· extracting role details from the job description…")
-	ext, err := extract.New(model).Extract(ctx, jdText)
+	ext, err := extract.New(model).Extract(lookupCtx, jdText)
 	if err != nil {
 		return err
 	}
@@ -97,7 +116,7 @@ func run() error {
 		return err
 	}
 	fmt.Fprintf(os.Stderr, "· looking up contacts at %s…\n", cfg.domain)
-	res, err := provider.FindByDomain(ctx, cfg.domain)
+	res, err := provider.FindByDomain(lookupCtx, cfg.domain)
 	if err != nil {
 		return err
 	}
@@ -108,9 +127,9 @@ func run() error {
 	// 5. Filter (deterministic partition).
 	part := filter.ByDepartment(res.Contacts, ext.Department)
 
-	// 6. Select (interactive).
+	// 6. Select (interactive, unbounded — waits on the user, not the clock).
 	ordered := append(append([]types.Contact{}, part.Matched...), part.Other...)
-	chosen, err := selectContacts(ordered, len(part.Matched), ext.Department)
+	chosen, err := selectContacts(os.Stdin, ordered, len(part.Matched), ext.Department)
 	if err != nil {
 		return err
 	}
@@ -119,12 +138,19 @@ func run() error {
 		return nil
 	}
 
+	// Phase B: draft + emit, per chosen contact. A fresh timeout budget, since
+	// however long the user spent choosing has no bearing on how long the
+	// drafting calls should be allowed to take.
+	draftCtx, cancelDraft := context.WithTimeout(context.Background(), perStepTimeout)
+	defer cancelDraft()
+
 	// 7. Draft + 8. Emit, per chosen contact.
 	if err := os.MkdirAll(cfg.outDir, 0o755); err != nil {
 		return fmt.Errorf("creating output dir: %w", err)
 	}
 	drafter := draft.New(model)
 	resumeFilename := filepath.Base(cfg.resumePath)
+	usedNames := map[string]int{}
 
 	for i, c := range chosen {
 		fmt.Fprintf(os.Stderr, "· drafting email %d/%d to %s…\n", i+1, len(chosen), contactLabel(c))
@@ -135,7 +161,7 @@ func run() error {
 			ResumeText: resumeText,
 			SenderName: cfg.senderName,
 		}
-		body, err := drafter.Draft(ctx, in)
+		body, err := drafter.Draft(draftCtx, in)
 		if err != nil {
 			return fmt.Errorf("drafting for %s: %w", c.Email, err)
 		}
@@ -155,7 +181,7 @@ func run() error {
 			return fmt.Errorf("building eml for %s: %w", c.Email, err)
 		}
 
-		outPath := filepath.Join(cfg.outDir, emlFilename(c))
+		outPath := filepath.Join(cfg.outDir, uniqueEmlFilename(c, usedNames))
 		if err := os.WriteFile(outPath, eml, 0o644); err != nil {
 			return fmt.Errorf("writing %s: %w", outPath, err)
 		}
@@ -166,24 +192,31 @@ func run() error {
 	return nil
 }
 
-func parseFlags() (config, error) {
+// errVersionRequested signals that -version was passed: parseFlags returns it
+// instead of printing and exiting itself, so parseFlags stays a pure function
+// callers (and tests) can exercise without a process exit.
+var errVersionRequested = errors.New("version requested")
+
+func parseFlags(args []string) (config, error) {
 	var cfg config
-	showVersion := flag.Bool("version", false, "print version and build information, then exit")
-	flag.StringVar(&cfg.domain, "domain", "", "company domain to find contacts at, e.g. acme.com (required)")
-	flag.StringVar(&cfg.jdInput, "jd", "", "job description: raw text, or an http(s) URL to a posting (required)")
-	flag.StringVar(&cfg.resumePath, "resume", "", "path to your resume file, attached to each email (required)")
-	flag.StringVar(&cfg.senderName, "name", "", "your name, used to sign emails (required)")
-	flag.StringVar(&cfg.senderAddr, "from", "", "your email address, used in the From header (required)")
-	flag.StringVar(&cfg.outDir, "out", "./grease-out", "directory to write .eml files into")
-	flag.StringVar(&cfg.llmURL, "llm", "http://localhost:8080", "base URL of the llama.cpp server")
-	flag.BoolVar(&cfg.useMock, "mock", false, "use the mock contact provider (no Hunter key, no network, no credits)")
-	flag.Parse()
+	fs := flag.NewFlagSet("grease", flag.ContinueOnError)
+	showVersion := fs.Bool("version", false, "print version and build information, then exit")
+	fs.StringVar(&cfg.domain, "domain", "", "company domain to find contacts at, e.g. acme.com (required)")
+	fs.StringVar(&cfg.jdInput, "jd", "", "job description: raw text, or an http(s) URL to a posting (required)")
+	fs.StringVar(&cfg.resumePath, "resume", "", "path to your resume file, attached to each email (required)")
+	fs.StringVar(&cfg.senderName, "name", "", "your name, used to sign emails (required)")
+	fs.StringVar(&cfg.senderAddr, "from", "", "your email address, used in the From header (required)")
+	fs.StringVar(&cfg.outDir, "out", "./grease-out", "directory to write .eml files into")
+	fs.StringVar(&cfg.llmURL, "llm", "http://localhost:8080", "base URL of the llama.cpp server")
+	fs.BoolVar(&cfg.useMock, "mock", false, "use the mock contact provider (no Hunter key, no network, no credits)")
+	if err := fs.Parse(args); err != nil {
+		return cfg, err
+	}
 
 	// -version short-circuits everything else: it must work without the
 	// otherwise-required flags.
 	if *showVersion {
-		fmt.Println(buildinfo.String())
-		os.Exit(0)
+		return cfg, errVersionRequested
 	}
 
 	var missing []string
@@ -217,20 +250,24 @@ func buildProvider(cfg config) (enrich.EmailProvider, error) {
 }
 
 func printExtraction(ext types.Extraction) {
-	fmt.Fprintf(os.Stderr, "  role:       %s\n", ext.Role)
+	fmt.Fprintf(os.Stderr, "  role:       %s\n", sanitizeForTerminal(ext.Role))
 	if ext.Company != "" {
-		fmt.Fprintf(os.Stderr, "  company:    %s\n", ext.Company)
+		fmt.Fprintf(os.Stderr, "  company:    %s\n", sanitizeForTerminal(ext.Company))
 	}
 	if len(ext.TechStack) > 0 {
-		fmt.Fprintf(os.Stderr, "  tech stack: %s\n", strings.Join(ext.TechStack, ", "))
+		fmt.Fprintf(os.Stderr, "  tech stack: %s\n", sanitizeForTerminal(strings.Join(ext.TechStack, ", ")))
 	}
 	fmt.Fprintf(os.Stderr, "  department: %s\n", ext.Department)
 }
 
-// selectContacts renders the partitioned contacts and reads the user's choice.
-// Matched contacts (department equals the extracted guess) are listed first,
-// then a divider, then the rest — nothing hidden.
-func selectContacts(ordered []types.Contact, matchedCount int, dept types.Department) ([]types.Contact, error) {
+// selectContacts renders the partitioned contacts and reads the user's choice
+// from r. Matched contacts (department equals the extracted guess) are listed
+// first, then a divider, then the rest — nothing hidden.
+//
+// r is a parameter (rather than reading os.Stdin directly) so this — the only
+// interactive step in the pipeline — is exercisable in tests without a real
+// terminal.
+func selectContacts(r io.Reader, ordered []types.Contact, matchedCount int, dept types.Department) ([]types.Contact, error) {
 	fmt.Println()
 	fmt.Println("Contacts found:")
 	for i, c := range ordered {
@@ -249,7 +286,7 @@ func selectContacts(ordered []types.Contact, matchedCount int, dept types.Depart
 	fmt.Println()
 	fmt.Print("Select contacts to email (comma-separated numbers, 'a' for all matched, or blank to cancel): ")
 
-	reader := bufio.NewReader(os.Stdin)
+	reader := bufio.NewReader(r)
 	line, err := reader.ReadString('\n')
 	if err != nil && line == "" {
 		return nil, fmt.Errorf("reading selection: %w", err)
@@ -269,8 +306,8 @@ func selectContacts(ordered []types.Contact, matchedCount int, dept types.Depart
 		if tok == "" {
 			continue
 		}
-		var n int
-		if _, err := fmt.Sscanf(tok, "%d", &n); err != nil {
+		n, err := strconv.Atoi(tok)
+		if err != nil {
 			return nil, fmt.Errorf("invalid selection %q", tok)
 		}
 		if n < 1 || n > len(ordered) {
@@ -290,18 +327,37 @@ func contactLine(c types.Contact) string {
 	if name == "" {
 		name = c.Email
 	}
-	parts := []string{name}
+	parts := []string{sanitizeForTerminal(name)}
 	if c.Position != "" {
-		parts = append(parts, c.Position)
+		parts = append(parts, sanitizeForTerminal(c.Position))
 	}
 	parts = append(parts, c.Email)
 	if c.Department != "" && c.Department != types.DeptUnknown {
-		parts = append(parts, fmt.Sprintf("[%s]", c.Department))
+		parts = append(parts, fmt.Sprintf("[%s]", sanitizeForTerminal(string(c.Department))))
 	}
 	if c.Confidence > 0 {
 		parts = append(parts, fmt.Sprintf("conf %d", c.Confidence))
 	}
 	return strings.Join(parts, " · ")
+}
+
+// sanitizeForTerminal strips ASCII control bytes (CR, LF, ANSI escape, etc.)
+// from text before it is printed to the terminal. Role, company, tech stack,
+// and contact position all originate outside grease's control — the JD text
+// (possibly fetched from an attacker-hostile URL) via the LLM, or the
+// enrichment provider's response — so none of it is trusted to be safe to
+// write to a terminal verbatim; an embedded escape sequence could otherwise
+// manipulate the terminal display.
+func sanitizeForTerminal(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r == '\t' {
+			return ' '
+		}
+		if r < 0x20 || r == 0x7f {
+			return -1
+		}
+		return r
+	}, s)
 }
 
 func contactLabel(c types.Contact) string {
@@ -311,8 +367,11 @@ func contactLabel(c types.Contact) string {
 	return c.Email
 }
 
-// emlFilename derives a filesystem-safe .eml name from a contact.
-func emlFilename(c types.Contact) string {
+// emlBaseName derives a filesystem-safe base name (no extension) from a
+// contact. Not unique on its own — contacts can share a name, or all fall
+// back to the same "contact" default — so callers writing multiple files in
+// one run must go through uniqueEmlFilename instead.
+func emlBaseName(c types.Contact) string {
 	base := c.Email
 	if n := c.FullName(); n != "" {
 		base = n
@@ -331,7 +390,21 @@ func emlFilename(c types.Contact) string {
 	if name == "" {
 		name = "contact"
 	}
-	return name + ".eml"
+	return name
+}
+
+// uniqueEmlFilename derives a filesystem-safe .eml name from a contact,
+// disambiguating against every name already produced in this run (tracked in
+// used) so two contacts that sanitize to the same base name — same name at
+// the company, or both nameless — don't silently overwrite each other's
+// drafted email on disk.
+func uniqueEmlFilename(c types.Contact, used map[string]int) string {
+	base := emlBaseName(c)
+	used[base]++
+	if n := used[base]; n > 1 {
+		return fmt.Sprintf("%s-%d.eml", base, n)
+	}
+	return base + ".eml"
 }
 
 // resumeTextForGrounding returns text to ground the draft. For text-like files
