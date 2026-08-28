@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/user/grease/internal/llm"
-	"github.com/user/grease/internal/types"
+	"github.com/muratcanozdemir/grease/internal/llm"
+	"github.com/muratcanozdemir/grease/internal/types"
 )
 
 func TestParse_Valid(t *testing.T) {

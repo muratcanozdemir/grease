@@ -20,7 +20,7 @@ package enrich
 import (
 	"context"
 
-	"github.com/user/grease/internal/types"
+	"github.com/muratcanozdemir/grease/internal/types"
 )
 
 // Result is what a lookup returns: the contacts found for a domain plus the

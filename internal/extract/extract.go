@@ -29,9 +29,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/user/grease/internal/llm"
-	"github.com/user/grease/internal/prompt"
-	"github.com/user/grease/internal/types"
+	"github.com/muratcanozdemir/grease/internal/llm"
+	"github.com/muratcanozdemir/grease/internal/prompt"
+	"github.com/muratcanozdemir/grease/internal/types"
 )
 
 // systemInstruction frames the task. Because the native endpoint's grammar is

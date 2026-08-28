@@ -6,7 +6,7 @@
 # be rehearsed locally before tagging.
 
 BINARY      := grease
-PKG         := github.com/user/grease
+PKG         := github.com/muratcanozdemir/grease
 BUILDINFO   := $(PKG)/internal/buildinfo
 VERSION     := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT      := $(shell git rev-parse --short HEAD 2>/dev/null || echo none)

@@ -1,3 +1,3 @@
-module github.com/user/grease
+module github.com/muratcanozdemir/grease
 
 go 1.26.6

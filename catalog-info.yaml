@@ -1,0 +1,13 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: grease
+  description: CLI that turns a company domain, a job posting, and a resume into ready-to-send .eml files, one per selected contact, with disciplined LLM-boundary design and no OAuth/inbox access.
+  tags: [go, cli, llm, job-search]
+  annotations:
+    github.com/project-slug: muratcanozdemir/grease
+    backstage.io/techdocs-ref: dir:.
+spec:
+  type: tool
+  owner: user:default/muratcanozdemir
+  lifecycle: experimental

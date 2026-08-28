@@ -1,0 +1,5 @@
+site_name: grease
+nav:
+  - Home: index.md
+plugins:
+  - techdocs-core
