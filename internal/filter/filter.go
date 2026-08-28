@@ -14,7 +14,7 @@
 // predictable is a one-line comparison.
 package filter
 
-import "github.com/user/grease/internal/types"
+import "github.com/muratcanozdemir/grease/internal/types"
 
 // Partition is the result of splitting contacts against a target department.
 type Partition struct {

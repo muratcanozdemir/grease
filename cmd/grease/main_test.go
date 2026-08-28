@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/user/grease/internal/types"
+	"github.com/muratcanozdemir/grease/internal/types"
 )
 
 func validArgs() []string {

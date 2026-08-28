@@ -28,15 +28,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/user/grease/internal/buildinfo"
-	"github.com/user/grease/internal/draft"
-	"github.com/user/grease/internal/emit"
-	"github.com/user/grease/internal/enrich"
-	"github.com/user/grease/internal/extract"
-	"github.com/user/grease/internal/filter"
-	"github.com/user/grease/internal/jd"
-	"github.com/user/grease/internal/llm"
-	"github.com/user/grease/internal/types"
+	"github.com/muratcanozdemir/grease/internal/buildinfo"
+	"github.com/muratcanozdemir/grease/internal/draft"
+	"github.com/muratcanozdemir/grease/internal/emit"
+	"github.com/muratcanozdemir/grease/internal/enrich"
+	"github.com/muratcanozdemir/grease/internal/extract"
+	"github.com/muratcanozdemir/grease/internal/filter"
+	"github.com/muratcanozdemir/grease/internal/jd"
+	"github.com/muratcanozdemir/grease/internal/llm"
+	"github.com/muratcanozdemir/grease/internal/types"
 )
 
 func main() {

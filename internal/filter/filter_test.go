@@ -3,7 +3,7 @@ package filter
 import (
 	"testing"
 
-	"github.com/user/grease/internal/types"
+	"github.com/muratcanozdemir/grease/internal/types"
 )
 
 func contacts() []types.Contact {

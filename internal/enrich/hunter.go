@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/user/grease/internal/types"
+	"github.com/muratcanozdemir/grease/internal/types"
 )
 
 // EnvAPIKey is the environment variable grease reads the Hunter key from.

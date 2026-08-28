@@ -63,7 +63,7 @@ jobs:
           version="${GITHUB_REF_NAME}"
           commit="$(git rev-parse --short HEAD)"
           date="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          pkg="github.com/user/grease/internal/buildinfo"
+          pkg="github.com/muratcanozdemir/grease/internal/buildinfo"
           ldflags="-s -w \
             -X ${pkg}.Version=${version} \
             -X ${pkg}.Commit=${commit} \

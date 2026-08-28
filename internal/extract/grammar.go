@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/user/grease/internal/types"
+	"github.com/muratcanozdemir/grease/internal/types"
 )
 
 // Grammar returns the GBNF that constrains extraction output.

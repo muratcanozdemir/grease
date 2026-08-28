@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/user/grease/internal/types"
+	"github.com/muratcanozdemir/grease/internal/types"
 )
 
 // hunterServer returns a test server replying with the given status and body,

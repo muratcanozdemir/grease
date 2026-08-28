@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/user/grease/internal/types"
+	"github.com/muratcanozdemir/grease/internal/types"
 )
 
 // MockProvider is an EmailProvider that returns fixed data and makes no network
